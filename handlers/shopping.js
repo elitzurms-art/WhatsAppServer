@@ -10,9 +10,10 @@ const { normalizePhone } = require('../sheets/helpers');
 function formatListForUser(items) {
     if (!items.length) return '🛒 הרשימה ריקה כרגע.';
     const lines = items.map(it => {
+        const emoji = it.emoji || '🛒';
         const qty = it.quantity ? ` (${it.quantity})` : '';
         const who = it.addedBy ? ` — ${it.addedBy}` : '';
-        return `• ${it.name}${qty}${who}`;
+        return `${emoji} ${it.name}${qty}${who}`;
     });
     return `🛒 *רשימת הקניות הפעילה:*\n${lines.join('\n')}`;
 }
@@ -68,7 +69,10 @@ async function handleShoppingChat(client, msg, phone, userName) {
         }
         try {
             const added = await shoppingList.addItems(cleaned, userName, phone);
-            const names = cleaned.map(it => it.quantity ? `${it.name} (${it.quantity})` : it.name).join(', ');
+            const names = cleaned.map(it => {
+                const emoji = it.emoji || '🛒';
+                return it.quantity ? `${emoji} ${it.name} (${it.quantity})` : `${emoji} ${it.name}`;
+            }).join(', ');
             const reply = `✅ הוספתי: ${names}`;
             await client.sendMessage(from, reply);
             shoppingHistory.appendTurn(phone, 'bot', reply, 'SHOPPING_CHAT', userName);
@@ -90,10 +94,10 @@ async function handleShoppingChat(client, msg, phone, userName) {
             return;
         }
         try {
-            // שמירת שמות לפני העדכון להצגה למשתמש
-            const removedNames = activeItems
+            // שמירת שמות+אימוג'י לפני העדכון להצגה למשתמש
+            const removed = activeItems
                 .filter(it => idx.includes(it.rowIndex))
-                .map(it => it.name);
+                .map(it => `${it.emoji || '🛒'} ${it.name}`);
             const count = await shoppingList.markBought(idx, userName);
             if (count === 0) {
                 const reply = 'לא נמצאו פריטים פעילים בשורות האלה.';
@@ -101,7 +105,7 @@ async function handleShoppingChat(client, msg, phone, userName) {
                 shoppingHistory.appendTurn(phone, 'bot', reply, 'SHOPPING_CHAT', userName);
                 return;
             }
-            const reply = `✅ סימנתי כנקנה: ${removedNames.length ? removedNames.join(', ') : `${count} פריטים`}`;
+            const reply = `✅ סימנתי כנקנה: ${removed.length ? removed.join(', ') : `${count} פריטים`}`;
             await client.sendMessage(from, reply);
             shoppingHistory.appendTurn(phone, 'bot', reply, 'SHOPPING_CHAT', userName);
         } catch (err) {

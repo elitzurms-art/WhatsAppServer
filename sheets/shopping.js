@@ -8,7 +8,7 @@ const creds = require('../credentials.json');
 const SHOPPING_SHEET_ID = process.env.SHOPPING_SHEET_ID || '17u5Nj9HcXrM80rlNCtkEJBdUOaQ6hGErJWY8lxPciN0';
 const LIST_TITLE = 'רשימה';
 const HISTORY_TITLE = 'היסטוריית שיחה';
-const LIST_HEADERS = ['חותמת זמן', 'פריט', 'כמות', 'מי הוסיף', 'טלפון', 'סטטוס', 'מי קנה', 'חותמת קנייה'];
+const LIST_HEADERS = ['חותמת זמן', 'אימוג\'י', 'פריט', 'כמות', 'מי הוסיף', 'טלפון', 'סטטוס', 'מי קנה', 'חותמת קנייה'];
 const HISTORY_HEADERS = ['חותמת זמן', 'טלפון', 'שם', 'תפקיד', 'מצב', 'תוכן'];
 
 const STATUS_ACTIVE = 'פעיל';
@@ -70,6 +70,7 @@ async function getActiveItems() {
             items.push({
                 rowIndex: row.rowNumber,
                 name: (row.get('פריט') || '').trim(),
+                emoji: (row.get('אימוג\'י') || '').trim(),
                 quantity: (row.get('כמות') || '').toString().trim(),
                 addedBy: (row.get('מי הוסיף') || '').trim(),
                 addedAt: (row.get('חותמת זמן') || '').trim()
@@ -94,6 +95,7 @@ async function addItems(items, addedBy, phone) {
     const timestamp = new Date().toLocaleString('he-IL');
     const rows = items.map(it => ({
         'חותמת זמן': timestamp,
+        'אימוג\'י': String(it.emoji || '').trim(),
         'פריט': String(it.name || '').trim(),
         'כמות': String(it.quantity || '').trim(),
         'מי הוסיף': addedBy || '',

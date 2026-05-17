@@ -26,12 +26,13 @@ const FN_DEFS = {
             properties: {
                 items: {
                     type: Type.ARRAY,
-                    description: 'רשימת פריטים להוספה. שם הפריט בעברית רגילה. כמות אופציונלית (אם המשתמש ציין).',
+                    description: 'רשימת פריטים להוספה. שם הפריט בעברית רגילה (בלי אימוג\'י בשם). כמות ואימוג\'י אופציונליים.',
                     items: {
                         type: Type.OBJECT,
                         properties: {
-                            name: { type: Type.STRING, description: 'שם הפריט' },
-                            quantity: { type: Type.STRING, description: 'כמות אם צוינה (לדוגמה "2", "תריסר", "1 ק"ג"). השאר ריק אם לא צוין.' }
+                            name: { type: Type.STRING, description: 'שם הפריט (טקסט נקי, ללא אימוג\'י)' },
+                            quantity: { type: Type.STRING, description: 'כמות אם צוינה (לדוגמה "2", "תריסר", "1 ק"ג"). השאר ריק אם לא צוין.' },
+                            emoji: { type: Type.STRING, description: 'אימוג\'י יחיד שמתאים לפריט (חלב→🥛, ביצים→🥚, לחם→🍞, עוף→🐔, גבינה→🧀, תפוח→🍎, שמן→🛢️). אם אין אימוג\'י מתאים, החזר 🛒.' }
                         },
                         required: ['name']
                     }
@@ -99,7 +100,7 @@ function buildSystemInstruction() {
         '',
         '## כללים:',
         '1. כל תשובה חייבת לקרוא לאחת הפונקציות. אסור טקסט חופשי בלי function call.',
-        '2. עבור add_items: הפרד פריטים ("לחם וגבינה" → 2 פריטים). אם נאמרה כמות, צרף אותה לאותו פריט.',
+        '2. עבור add_items: הפרד פריטים ("לחם וגבינה" → 2 פריטים). אם נאמרה כמות, צרף אותה לאותו פריט. תמיד הוסף שדה emoji שמתאים לפריט (אימוג\'י יחיד, fallback 🛒 אם אין מתאים).',
         '3. עבור remove_items: השתמש *רק* ב-rowIndex שראית ברשימה. אם המשתמש אומר "תמחק חלב" ויש שני חלבים — תמחק את כולם או תשאל הבהרה.',
         '4. שיהיה ידידותי, קצר, וטבעי בעברית. תהיה גם נינוח עם משפחה.',
         '5. אם המשתמש שואל מה ברשימה — view_list (הבוט יעצב את הרשימה למשתמש; אתה לא צריך לכתוב אותה).'
@@ -109,9 +110,10 @@ function buildSystemInstruction() {
 function formatActiveList(items) {
     if (!items.length) return '(הרשימה ריקה)';
     return items.map(it => {
+        const emoji = it.emoji ? `${it.emoji} ` : '';
         const qty = it.quantity ? ` (${it.quantity})` : '';
         const who = it.addedBy ? ` — ${it.addedBy}` : '';
-        return `[${it.rowIndex}] ${it.name}${qty}${who}`;
+        return `[${it.rowIndex}] ${emoji}${it.name}${qty}${who}`;
     }).join('\n');
 }
 
