@@ -63,4 +63,17 @@ function containsGemachSki(text) {
     return false;
 }
 
-module.exports = { isTrigger, containsGemachSki };
+// =======================
+// טריגר רך לבוט הקניות: "קניות" / "רשימה" / "רשימת קניות" / "shopping".
+// הערה: \b לא עובד טוב עם עברית ב-JS, אז משתמשים ב-substring רגיל לעברית.
+// =======================
+const LOOSE_SHOPPING_RE = /קניות|רשימה|רשימת קניות/;
+const LOOSE_SHOPPING_EN_RE = /\bshopping\b/i;
+
+function containsShopping(text) {
+    if (!text) return false;
+    const t = String(text);
+    return LOOSE_SHOPPING_RE.test(t) || LOOSE_SHOPPING_EN_RE.test(t);
+}
+
+module.exports = { isTrigger, containsGemachSki, containsShopping };
