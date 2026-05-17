@@ -13,6 +13,10 @@ node_modules/
 .wwebjs_cache/
 .cache/
 latest_chrome/
+__pycache__/
+
+# Runtime state
+claude_listener_state.json
 
 # Credentials
 credentials.json
