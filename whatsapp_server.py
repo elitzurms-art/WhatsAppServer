@@ -1,8 +1,34 @@
 from mcp.server.fastmcp import FastMCP
 import httpx
+import base64
+import mimetypes
+import os
 from typing import Optional
 
 mcp = FastMCP("whatsapp")
+
+
+async def _post_large(path: str, body: dict, timeout: float = 120.0) -> dict:
+    """POST helper with a long timeout for base64-encoded media uploads.
+    The default 15s in `_post` is too tight for multi-MB payloads going
+    over the internet to bot.elitzurgames.com."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(f"{BASE_URL}{path}", headers=HEADERS, json=body)
+        return r.json()
+
+
+def _read_file_as_base64(file_path: str, default_mimetype: str = "application/octet-stream") -> tuple[str, str]:
+    """Return (base64_payload, mimetype) for a local file. Mimetype is
+    guessed from the extension; falls back to `default_mimetype` if the
+    extension isn't recognized."""
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    mimetype, _ = mimetypes.guess_type(file_path)
+    if not mimetype:
+        mimetype = default_mimetype
+    with open(file_path, "rb") as f:
+        data = f.read()
+    return base64.b64encode(data).decode("ascii"), mimetype
 
 BASE_URL = "https://bot.elitzurgames.com"
 API_KEY = "a17d2A17d2"
@@ -76,6 +102,21 @@ async def send_whatsapp_image(phone: str, image_url: str, caption: str = "") -> 
 
 
 @mcp.tool()
+async def send_whatsapp_image_from_file(phone: str, file_path: str, caption: str = "") -> dict:
+    """Send a LOCAL image file by uploading its bytes inline (no public
+    URL needed). Use this when you have a file on the local machine and
+    don't want to host it on an external server first.
+    `file_path` is an absolute path on the machine running this MCP."""
+    b64, mimetype = _read_file_as_base64(file_path, "image/jpeg")
+    return await _post_large("/send/image", {
+        "phone": phone,
+        "imageBase64": b64,
+        "mimetype": mimetype,
+        "caption": caption,
+    })
+
+
+@mcp.tool()
 async def send_whatsapp_video(phone: str, video_url: str, caption: str = "") -> dict:
     """Send a video by URL to a WhatsApp number."""
     return await _post("/send/video", {"phone": phone, "videoUrl": video_url, "caption": caption})
@@ -91,6 +132,23 @@ async def send_whatsapp_audio(phone: str, audio_url: str, ptt: bool = False) -> 
 async def send_whatsapp_document(phone: str, document_url: str, filename: str, caption: str = "") -> dict:
     """Send a document/file by URL to a WhatsApp number."""
     return await _post("/send/document", {"phone": phone, "documentUrl": document_url, "filename": filename, "caption": caption})
+
+
+@mcp.tool()
+async def send_whatsapp_document_from_file(phone: str, file_path: str, filename: str = "", caption: str = "") -> dict:
+    """Send a LOCAL document/file by uploading its bytes inline (no
+    public URL needed). `filename` is what WhatsApp shows on the file
+    bubble; if empty, the basename of `file_path` is used."""
+    b64, mimetype = _read_file_as_base64(file_path)
+    if not filename:
+        filename = os.path.basename(file_path)
+    return await _post_large("/send/document", {
+        "phone": phone,
+        "documentBase64": b64,
+        "mimetype": mimetype,
+        "filename": filename,
+        "caption": caption,
+    })
 
 
 @mcp.tool()
