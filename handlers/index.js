@@ -4,6 +4,9 @@ const sessions = require('../sheets/sessions');
 const { normalizePhone, validateSelection } = require('../sheets/helpers');
 const { sendWhatsAppButtons, sendWhatsAppText } = require('../sheets/whatsapp');
 const { rescueMessage } = require('../ai/rescue');
+const { isTrigger, containsGemachSki } = require('../ai/trigger');
+const { runFreeChat } = require('../ai/freeChat');
+const conversationHistory = require('../sheets/conversationHistory');
 
 // שליפה נקודתית של רשימת פריטים רלוונטית למצב — להעברה ל-AI כ-context
 async function loadInventorySnapshot(state, phone) {
@@ -30,7 +33,7 @@ async function handleMessage(client, msg, session) {
 		const phone = normalizePhone(phoneNumber);
 		// שליפת השם של המשתמש מוואטסאפ
 		const userName = msg.pushname || msg._data?.notifyName || 'לא ידוע';
-		
+
 		const currentState = (session && session.state) ? session.state : 'ANUNIMI';
 		const text = msg.body?.trim();
 
@@ -38,12 +41,52 @@ async function handleMessage(client, msg, session) {
 		console.log(`switch- Name: ${userName} | Phone: ${phone} | State: ${currentState} | Text: ${text}`);
 
 		// ===============================
+		// ANUNIMI: כניסה לבוט רק אם ההודעה מזכירה "גמ"ח סקי".
+		// - טריגר מדויק (וריאציות הפתיח של isTrigger) → startSession עם תפריט.
+		// - מזכיר גמ"ח+סקי בצורה חופשית → FREE_CHAT.
+		// - אחרת — מתעלמים לחלוטין (זה גם הוואטסאפ הפרטי, לא להגיב על כל הודעה).
+		// ===============================
+		if (currentState === 'ANUNIMI') {
+			if (!text) return;
+			if (isTrigger(text)) {
+				conversationHistory.appendTurn(phone, 'user', text, currentState, userName);
+				await startSession(client, msg, userName);
+			} else if (containsGemachSki(text) && process.env.GEMINI_API_KEY) {
+				conversationHistory.appendTurn(phone, 'user', text, currentState, userName);
+				await handleFreeChat(client, msg, phone, userName);
+			} else {
+				// הודעה לא קשורה לבוט — שקט (גם בלי תיעוד היסטוריה).
+				return;
+			}
+			return;
+		}
+
+		// יש סשן פעיל — מתעדים הודעה (לכל מצב שאינו ANUNIMI)
+		if (text) {
+			conversationHistory.appendTurn(phone, 'user', text, currentState, userName);
+		}
+
+		// ===============================
+		// FREE_CHAT: לולאת שיחה חופשית
+		// ===============================
+		if (currentState === 'FREE_CHAT') {
+			if (text && isTrigger(text)) {
+				// המשתמש כתב "גמ"ח סקי" בתוך שיחה חופשית — מאפסים ופותחים תפריט
+				await startSession(client, msg, userName);
+				return;
+			}
+			await handleFreeChat(client, msg, phone, userName);
+			return;
+		}
+
+		// ===============================
 		// שכבת AI rescue: אם המטפל הקשיח לא יצליח לפרש את ההודעה — ה-AI מתערב.
 		// רץ רק כשיש סשן פעיל (לא ב-ANUNIMI) ורק אם יש טקסט.
 		// ===============================
-		if (currentState !== 'ANUNIMI' && text && process.env.GEMINI_API_KEY) {
+		if (text && process.env.GEMINI_API_KEY) {
 			try {
 				const inventorySnapshot = await loadInventorySnapshot(currentState, phone);
+				const history = conversationHistory.getRecentHistory(phone, 10);
 				const result = await rescueMessage({
 					state: currentState,
 					text,
@@ -51,17 +94,20 @@ async function handleMessage(client, msg, session) {
 					userName,
 					inventorySnapshot,
 					sessionPayload: session?.payload,
+					history,
 					source: 'text'
 				});
 
 				if (result.action === 'reply') {
 					await client.sendMessage(msg.from, result.message);
+					conversationHistory.appendTurn(phone, 'bot', result.message, currentState, userName);
 					return;
 				}
 				if (result.action === 'cancel') {
 					await sessions.clearSession(phone);
-					await client.sendMessage(msg.from,
-						'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת לשאול, להחזיר או לשריין- רשום מחדש "גמ"ח סקי"');
+					const goodbye = 'התהליך בוטל\n😊 תודה שהשתמשת בגמ"ח סקי!\n\nעל מנת לשאול, להחזיר או לשריין- רשום מחדש "גמ"ח סקי"';
+					await client.sendMessage(msg.from, goodbye);
+					conversationHistory.appendTurn(phone, 'bot', goodbye, currentState, userName);
 					return;
 				}
 				if (result.action === 'rewrite' && result.newText) {
@@ -75,12 +121,7 @@ async function handleMessage(client, msg, session) {
 		}
 
 		switch (currentState) {
-			
-			case 'ANUNIMI':
-				// כאן אנחנו מעבירים את השם גם ל-startSession כדי שישמר בסשן
-				await startSession(client, msg, userName);
-				break;
-					
+
 			case 'BORROW_SELECT':
 			case 'RETURN_SELECT':
 			case 'RESERVE_SELECT':
@@ -109,7 +150,7 @@ async function handleMessage(client, msg, session) {
 				await sessions.clearSession(phone);
 				break;
 		}
-		
+
 	} catch (err) {
 		if (err.message && err.message.includes('Execution context was destroyed')) {
 			console.log('⚠️ דף הוואטסאפ התרענן, מתעלם וממשיך...');
@@ -117,6 +158,77 @@ async function handleMessage(client, msg, session) {
 			console.error('❌ שגיאה ב-handleMessage:', err.message);
 		}
 	}
+}
+
+
+/* ===================== שיחה חופשית (FREE_CHAT) ===================== */
+async function handleFreeChat(client, msg, phone, userName) {
+	const from = msg.from;
+	const text = msg.body?.trim();
+	if (!text) return;
+
+	// טוענים מלאי + פריטי המשתמש כקונטקסט ל-AI
+	let inventoryItems = [];
+	let userItems = [];
+	try {
+		const inv = await inventory.getAvailableItems();
+		inventoryItems = [...(inv.coats || []), ...(inv.pants || []), ...(inv.additional || [])];
+		const mine = await inventory.getBorrowedItemsByPhone(phone);
+		userItems = [...(mine.coats || []), ...(mine.pants || []), ...(mine.additional || [])];
+	} catch (e) {
+		console.error('❌ free chat inventory load failed:', e.message);
+	}
+
+	// שומרים סשן FREE_CHAT לפני הקריאה ל-AI — שהודעה כפולה לא תיכנס שוב ל-ANUNIMI
+	await sessions.saveSession(phone, 'FREE_CHAT', '');
+
+	const history = conversationHistory.getRecentHistory(phone, 10);
+	const result = await runFreeChat({ text, history, inventoryItems, userItems, userName });
+
+	if (!result) {
+		const fallback = 'מצטער, לא הצלחתי להבין. אפשר לנסח שוב? לתפריט הראשי עם אפשרויות בחירה — שלח "גמ"ח סקי".';
+		await client.sendMessage(from, fallback);
+		conversationHistory.appendTurn(phone, 'bot', fallback, 'FREE_CHAT', userName);
+		return;
+	}
+
+	if (result.tool === 'answer_question') {
+		const reply = result.input?.text || 'מצטער, לא הצלחתי לנסח תשובה. נסה שוב.';
+		await client.sendMessage(from, reply);
+		conversationHistory.appendTurn(phone, 'bot', reply, 'FREE_CHAT', userName);
+		return;
+	}
+
+	if (result.tool === 'end_chat') {
+		const bye = 'בכיף 😊 לכל שאלה או פעולה בעתיד — שלח "גמ"ח סקי".';
+		await client.sendMessage(from, bye);
+		conversationHistory.appendTurn(phone, 'bot', bye, 'FREE_CHAT', userName);
+		await sessions.clearSession(phone);
+		conversationHistory.clearHistory(phone);
+		return;
+	}
+
+	if (result.tool === 'start_action') {
+		const action = result.input?.action;
+		console.log(`🧠 free chat → start_action: ${action}`);
+		if (action === 'borrow') {
+			await handleBorrowSelect(client, msg);
+		} else if (action === 'return') {
+			await handleReturnSelect(client, msg);
+		} else if (action === 'reserve') {
+			await handleReserveSelect(client, msg);
+		} else {
+			const fb = 'לא הבנתי איזו פעולה תרצה. אפשר לרשום "גמ"ח סקי" לתפריט עם אפשרויות בחירה.';
+			await client.sendMessage(from, fb);
+			conversationHistory.appendTurn(phone, 'bot', fb, 'FREE_CHAT', userName);
+		}
+		return;
+	}
+
+	// כלי לא צפוי
+	const fb = 'מצטער, התבלבלתי. אפשר לנסח מחדש או לשלוח "גמ"ח סקי" לתפריט.';
+	await client.sendMessage(from, fb);
+	conversationHistory.appendTurn(phone, 'bot', fb, 'FREE_CHAT', userName);
 }
 
 

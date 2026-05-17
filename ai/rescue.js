@@ -83,12 +83,12 @@ function aiToRigidText(state, tool, input) {
  * מבצע rescue להודעה.
  * @returns {Promise<{action:'passthrough'|'rewrite'|'reply'|'cancel', newText?:string, message?:string}>}
  */
-async function rescueMessage({ state, text, phone, userName, inventorySnapshot, sessionPayload, source = 'text' }) {
+async function rescueMessage({ state, text, phone, userName, inventorySnapshot, sessionPayload, history, source = 'text' }) {
     if (rigidWouldAccept(state, text)) {
         return { action: 'passthrough' };
     }
 
-    const intent = await extractIntent({ state, text, inventorySnapshot, sessionPayload });
+    const intent = await extractIntent({ state, text, inventorySnapshot, sessionPayload, history });
 
     if (!intent) {
         // fallback — תן למטפל הקשיח להציג שגיאה כרגיל

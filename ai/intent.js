@@ -141,7 +141,7 @@ function buildSystemInstruction() {
     ].join('\n');
 }
 
-function buildContextText({ state, inventorySnapshot, sessionPayload, text }) {
+function buildContextText({ state, inventorySnapshot, sessionPayload, text, history }) {
     const parts = [`## מצב נוכחי: ${state}`];
 
     if (sessionPayload) {
@@ -159,6 +159,11 @@ function buildContextText({ state, inventorySnapshot, sessionPayload, text }) {
         inventorySnapshot.forEach(it => {
             parts.push(`- ${it.id}: ${it.name}${it.status && it.status !== 'במלאי' ? ` (${it.status})` : ''}`);
         });
+    }
+
+    if (history && history.length) {
+        parts.push('', '## היסטוריית שיחה אחרונה (מהישנה לחדשה):');
+        history.forEach(t => parts.push(`${t.role === 'user' ? 'משתמש' : 'בוט'}: ${t.content}`));
     }
 
     parts.push('', '## הודעת המשתמש:', `"${String(text || '').slice(0, 1000)}"`);

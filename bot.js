@@ -8,7 +8,6 @@ const { handleMessage } = require('./handlers');
 const { getSession } = require('./sheets/sessions');
 const { handleReminderResponse } = require('./handlers/reminderResponse');
 const { apiSentIds } = require('./shared');
-const { isTrigger: isEntryTrigger } = require('./ai/trigger');
 console.log('✅ כל המודולים נטענו');
 
 
@@ -221,7 +220,6 @@ client.on('message', async (msg) => {
         return;
     }
 
-    const text = msg.body?.trim().toLowerCase() || "";
     const { normalizePhone } = require('./sheets/helpers');
 
     // קבלת מספר הטלפון הנכון מ-contact.number
@@ -232,26 +230,16 @@ client.on('message', async (msg) => {
     // 2. קבלת סשן
     const session = await getSession(phone);
 
-    // 3. בדיקת טריגר (עם וריאציות מורחבות — ai/trigger.js)
-    const isTrigger = isEntryTrigger(text);
-
-    // 4. ניתוב לפי מצב הסשן
+    // 3. ניתוב לפי מצב הסשן (טריגר ו-FREE_CHAT נבדקים בתוך handleMessage)
     try {
-        // א. אין סשן?
-        if (!session) {
-            if (isTrigger) {
-                // יש "גמח סקי" - מתחיל סשן חדש
-                await handleMessage(client, msg, session);
-            } else {
-                // אין סשן ואין טריגר - זורק
-                return;
-            }
-        }
-        // ב. סשן תזכורת?
-        else if (session.state === 'REMINDER_PENDING') {
+        // א. סשן תזכורת — נשמר מסלול ייעודי
+        if (session && session.state === 'REMINDER_PENDING') {
             await handleReminderResponse(client, msg, phone);
         }
-        // ג. כל סשן אחר
+        // ב. כל מצב אחר (כולל אין-סשן) — handleMessage מטפל:
+        //    - טריגר → startSession
+        //    - אין-טריגר ואין-סשן → FREE_CHAT (אם GEMINI_API_KEY מוגדר)
+        //    - סשן פעיל → state machine + rescue
         else {
             await handleMessage(client, msg, session);
         }
