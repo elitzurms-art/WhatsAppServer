@@ -5,7 +5,18 @@ module.exports = function messagesRoutes(client) {
     const router = express.Router();
 
     async function loadMessage(messageId) {
-        const msg = await client.getMessageById(messageId);
+        let msg = await client.getMessageById(messageId).catch(() => null);
+        if (!msg) {
+            const parts = messageId.split('_');
+            if (parts.length >= 3) {
+                const chatId = parts[1];
+                const chat = await client.getChatById(chatId).catch(() => null);
+                if (chat) {
+                    const messages = await chat.fetchMessages({ limit: 200 });
+                    msg = messages.find(m => m.id._serialized === messageId) || null;
+                }
+            }
+        }
         if (!msg) throw new Error('Message not found');
         return msg;
     }
