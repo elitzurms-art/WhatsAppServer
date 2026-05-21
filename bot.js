@@ -7,7 +7,7 @@ const path = require('path');
 const { handleMessage } = require('./handlers');
 const { getSession } = require('./sheets/sessions');
 const { handleReminderResponse } = require('./handlers/reminderResponse');
-const { apiSentIds } = require('./shared');
+const { apiSentIds, botSentIds } = require('./shared');
 console.log('✅ כל המודולים נטענו');
 
 
@@ -84,6 +84,21 @@ const client = new Client({
     },
 });
 console.log('✅ Client נוצר בהצלחה');
+
+// עטיפת client.sendMessage כדי לעקוב אחר הודעות שהבוט שולח (לסינון message_create בקבוצות)
+const _origSendMessage = client.sendMessage.bind(client);
+client.sendMessage = async (...args) => {
+    const sent = await _origSendMessage(...args);
+    try {
+        const id = sent?.id?._serialized;
+        if (id) {
+            botSentIds.add(id);
+            // ניקוי אחרי 60 שניות כדי שה-Set לא יגדל לאינסוף
+            setTimeout(() => botSentIds.delete(id), 60 * 1000);
+        }
+    } catch {}
+    return sent;
+};
 
 // =======================
 // QR
@@ -204,12 +219,16 @@ client.on('message_revoke_me', async (msg) => {
 // הודעות נכנסות
 // =======================
 
+const SHOPPING_GROUP_ID = process.env.SHOPPING_GROUP_ID || '120363425150426466@g.us';
+
 client.on('message', async (msg) => {
     // עדכון זמן הודעה אחרונה
     lastMessageTime = Date.now();
 
     // 1. חומת אש
-    if (!msg || msg.fromMe || !msg.from || msg.from.endsWith('@g.us') || msg.from.endsWith('@broadcast') || (!msg.body && msg.type !== 'buttons_response')) {
+    const isShoppingGroup = msg.from === SHOPPING_GROUP_ID;
+    const isOtherGroup = msg.from?.endsWith('@g.us') && !isShoppingGroup;
+    if (!msg || msg.fromMe || !msg.from || isOtherGroup || msg.from.endsWith('@broadcast') || (!msg.body && msg.type !== 'buttons_response')) {
 		console.log('⛔ msg or body missing');
         return;
     }
@@ -227,8 +246,9 @@ client.on('message', async (msg) => {
     const phoneNumber = contact.number;
     const phone = normalizePhone(phoneNumber);
 
-    // 2. קבלת סשן
-    const session = await getSession(phone);
+    // 2. קבלת סשן — בקבוצת קניות הסשן משותף לכל המשתתפים, נשמר לפי group ID
+    const sessionKey = isShoppingGroup ? SHOPPING_GROUP_ID : phone;
+    const session = await getSession(sessionKey);
 
     // 3. ניתוב לפי מצב הסשן (טריגר ו-FREE_CHAT נבדקים בתוך handleMessage)
     try {
@@ -257,6 +277,24 @@ client.on('message', async (msg) => {
     }
 });
 
+
+// =======================
+// הודעות של משה עצמו לקבוצת הקניות — message_create כדי לתפוס fromMe
+// =======================
+client.on('message_create', async (msg) => {
+    if (!msg.fromMe) return;
+    if (msg.from !== SHOPPING_GROUP_ID) return;
+    if (!msg.body && msg.type !== 'buttons_response') return;
+    if (botSentIds.delete(msg.id._serialized)) return; // הודעה שיצאה מהבוט עצמו ב-client.sendMessage
+    if (apiSentIds.delete(msg.id._serialized)) return; // הודעה שיצאה דרך ה-API
+
+    try {
+        const session = await getSession(SHOPPING_GROUP_ID);
+        await handleMessage(client, msg, session);
+    } catch (err) {
+        console.error('❌ שגיאה בטיפול בהודעת קבוצת קניות (משה):', err.message);
+    }
+});
 
 // =======================
 // העברת הקלטות ← אליעזר ← קלוד קוד

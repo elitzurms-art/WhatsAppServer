@@ -4,11 +4,13 @@ const sessions = require('../sheets/sessions');
 const { normalizePhone, validateSelection } = require('../sheets/helpers');
 const { sendWhatsAppButtons, sendWhatsAppText } = require('../sheets/whatsapp');
 const { rescueMessage } = require('../ai/rescue');
-const { isTrigger, containsGemachSki, containsShopping } = require('../ai/trigger');
+const { isTrigger, containsGemachSki } = require('../ai/trigger');
 const { runFreeChat } = require('../ai/freeChat');
 const conversationHistory = require('../sheets/conversationHistory');
 const shoppingHistory = require('../sheets/shoppingHistory');
 const { handleShoppingChat, handleShoppingClearConfirm } = require('./shopping');
+
+const SHOPPING_GROUP_ID = process.env.SHOPPING_GROUP_ID || '120363425150426466@g.us';
 
 // שליפה נקודתית של רשימת פריטים רלוונטית למצב — להעברה ל-AI כ-context
 async function loadInventorySnapshot(state, phone) {
@@ -43,12 +45,29 @@ async function handleMessage(client, msg, session) {
 		console.log(`switch- Name: ${userName} | Phone: ${phone} | State: ${currentState} | Text: ${text}`);
 
 		// ===============================
-		// ANUNIMI: כניסה לבוט רק אם ההודעה מזכירה גמ"ח סקי או טריגר קניות.
+		// קבוצת קניות: כל הודעה נכנסת ישירות לבוט הקניות.
+		// סשן והיסטוריה נשמרים תחת מפתח קבוצתי משותף (SHOPPING_GROUP_ID),
+		// כך שכל המשתתפים בקבוצה משתפים את אותה שיחה.
+		// ===============================
+		if (msg.from === SHOPPING_GROUP_ID) {
+			if (!text) return;
+			const groupKey = SHOPPING_GROUP_ID;
+			shoppingHistory.appendTurn(groupKey, 'user', text, currentState, userName);
+			if (currentState === 'SHOPPING_CLEAR_CONFIRM') {
+				await handleShoppingClearConfirm(client, msg, groupKey, userName);
+			} else {
+				await handleShoppingChat(client, msg, groupKey, userName, phone);
+			}
+			return;
+		}
+
+		// ===============================
+		// ANUNIMI: כניסה לבוט רק אם ההודעה מזכירה גמ"ח סקי.
+		// בוט הקניות פועל רק בקבוצת הקניות (טופל למעלה), לא בצ'אטים פרטיים.
 		// סדר עדיפויות:
-		//   1. טריגר מדויק של גמ"ח סקי → startSession עם תפריט (הכי ספציפי).
+		//   1. טריגר מדויק של גמ"ח סקי → startSession עם תפריט.
 		//   2. מזכיר גמ"ח+סקי בצורה חופשית → FREE_CHAT.
-		//   3. מזכיר טריגר קניות → SHOPPING_CHAT.
-		//   4. אחרת — שקט (זה גם הוואטסאפ הפרטי, לא להגיב על כל הודעה).
+		//   3. אחרת — שקט (זה גם הוואטסאפ הפרטי, לא להגיב על כל הודעה).
 		// ===============================
 		if (currentState === 'ANUNIMI') {
 			if (!text) return;
@@ -58,38 +77,9 @@ async function handleMessage(client, msg, session) {
 			} else if (containsGemachSki(text) && process.env.GEMINI_API_KEY) {
 				conversationHistory.appendTurn(phone, 'user', text, currentState, userName);
 				await handleFreeChat(client, msg, phone, userName);
-			} else if (containsShopping(text) && (process.env.GEMINI_API_KEY_SHOPPING || process.env.GEMINI_API_KEY)) {
-				shoppingHistory.appendTurn(phone, 'user', text, currentState, userName);
-				await handleShoppingChat(client, msg, phone, userName);
 			} else {
 				// הודעה לא קשורה לבוט — שקט (גם בלי תיעוד היסטוריה).
 				return;
-			}
-			return;
-		}
-
-		// ===============================
-		// SHOPPING_CHAT / SHOPPING_CLEAR_CONFIRM: לולאת בוט הקניות.
-		// טריגר גמ"ח סקי בתוך שיחת קניות → מעבר לגמ"ח (משתמש מבקש שינוי מפורש).
-		// ===============================
-		if (currentState === 'SHOPPING_CHAT' || currentState === 'SHOPPING_CLEAR_CONFIRM') {
-			if (text && isTrigger(text)) {
-				conversationHistory.appendTurn(phone, 'user', text, currentState, userName);
-				await startSession(client, msg, userName);
-				return;
-			}
-			if (text && containsGemachSki(text) && process.env.GEMINI_API_KEY) {
-				conversationHistory.appendTurn(phone, 'user', text, currentState, userName);
-				await handleFreeChat(client, msg, phone, userName);
-				return;
-			}
-			if (text) {
-				shoppingHistory.appendTurn(phone, 'user', text, currentState, userName);
-			}
-			if (currentState === 'SHOPPING_CLEAR_CONFIRM') {
-				await handleShoppingClearConfirm(client, msg, phone, userName);
-			} else {
-				await handleShoppingChat(client, msg, phone, userName);
 			}
 			return;
 		}
@@ -106,11 +96,6 @@ async function handleMessage(client, msg, session) {
 			if (text && isTrigger(text)) {
 				// המשתמש כתב "גמ"ח סקי" בתוך שיחה חופשית — מאפסים ופותחים תפריט
 				await startSession(client, msg, userName);
-				return;
-			}
-			if (text && containsShopping(text) && (process.env.GEMINI_API_KEY_SHOPPING || process.env.GEMINI_API_KEY)) {
-				// המשתמש מבקש מעבר לבוט הקניות
-				await handleShoppingChat(client, msg, phone, userName);
 				return;
 			}
 			await handleFreeChat(client, msg, phone, userName);

@@ -18,10 +18,13 @@ function formatListForUser(items) {
     return `🛒 *רשימת הקניות הפעילה:*\n${lines.join('\n')}`;
 }
 
-async function handleShoppingChat(client, msg, phone, userName) {
+async function handleShoppingChat(client, msg, phone, userName, senderPhone) {
     const from = msg.from;
     const text = msg.body?.trim();
     if (!text) return;
+    // senderPhone הוא הטלפון של השולח עצמו (לשורה בגיליון).
+    // phone משמש כמפתח לסשן/היסטוריה — בקבוצה זה group ID משותף.
+    const phoneForSheet = senderPhone || phone;
 
     // טוענים את הרשימה הפעילה כקונטקסט ל-AI
     let activeItems = [];
@@ -68,7 +71,7 @@ async function handleShoppingChat(client, msg, phone, userName) {
             return;
         }
         try {
-            const added = await shoppingList.addItems(cleaned, userName, phone);
+            const added = await shoppingList.addItems(cleaned, userName, phoneForSheet);
             const names = cleaned.map(it => {
                 const emoji = it.emoji || '🛒';
                 return it.quantity ? `${emoji} ${it.name} (${it.quantity})` : `${emoji} ${it.name}`;
