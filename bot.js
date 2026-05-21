@@ -7,7 +7,7 @@ const path = require('path');
 const { handleMessage } = require('./handlers');
 const { getSession } = require('./sheets/sessions');
 const { handleReminderResponse } = require('./handlers/reminderResponse');
-const { apiSentIds, botSentIds } = require('./shared');
+const { apiSentIds, botSentIds, pendingBotSends } = require('./shared');
 console.log('✅ כל המודולים נטענו');
 
 
@@ -85,15 +85,24 @@ const client = new Client({
 });
 console.log('✅ Client נוצר בהצלחה');
 
-// עטיפת client.sendMessage כדי לעקוב אחר הודעות שהבוט שולח (לסינון message_create בקבוצות)
+// עטיפת client.sendMessage כדי לעקוב אחר הודעות שהבוט שולח (לסינון message_create בקבוצות).
+// משתמשים ב-pendingBotSends (chat_id:body) שמסומן *לפני* השליחה — שובר race עם message_create.
+// בנוסף, רושמים את ה-ID ל-botSentIds אחרי שהוא ידוע (כגיבוי).
 const _origSendMessage = client.sendMessage.bind(client);
 client.sendMessage = async (...args) => {
+    const [chatId, content] = args;
+    const bodyStr = typeof content === 'string' ? content : (content?.body || '');
+    const pendKey = bodyStr ? `${chatId}::${bodyStr}` : null;
+    if (pendKey) {
+        pendingBotSends.set(pendKey, Date.now());
+        // ניקוי אחרי 30 שניות
+        setTimeout(() => pendingBotSends.delete(pendKey), 30 * 1000);
+    }
     const sent = await _origSendMessage(...args);
     try {
         const id = sent?.id?._serialized;
         if (id) {
             botSentIds.add(id);
-            // ניקוי אחרי 60 שניות כדי שה-Set לא יגדל לאינסוף
             setTimeout(() => botSentIds.delete(id), 60 * 1000);
         }
     } catch {}
@@ -286,8 +295,15 @@ client.on('message_create', async (msg) => {
     // בהודעות fromMe: msg.from הוא ה-WID של השולח (משה), msg.to הוא היעד (הקבוצה).
     if (msg.to !== SHOPPING_GROUP_ID) return;
     if (!msg.body && msg.type !== 'buttons_response') return;
-    if (botSentIds.delete(msg.id._serialized)) return; // הודעה שיצאה מהבוט עצמו ב-client.sendMessage
-    if (apiSentIds.delete(msg.id._serialized)) return; // הודעה שיצאה דרך ה-API
+
+    // סינון הודעות שהבוט עצמו שלח: קודם לפי body (race-safe), אחר כך לפי ID.
+    const pendKey = `${msg.to}::${msg.body || ''}`;
+    if (pendingBotSends.has(pendKey)) {
+        pendingBotSends.delete(pendKey);
+        return;
+    }
+    if (botSentIds.delete(msg.id._serialized)) return;
+    if (apiSentIds.delete(msg.id._serialized)) return;
 
     // משווים את msg.from לערך ה-chat ID של הקבוצה כדי שהראוטינג ב-handlers/index.js
     // והשליחה חזרה (client.sendMessage(msg.from)) יזהו את היעד הנכון.
