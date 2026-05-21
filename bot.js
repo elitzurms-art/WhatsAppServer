@@ -283,10 +283,15 @@ client.on('message', async (msg) => {
 // =======================
 client.on('message_create', async (msg) => {
     if (!msg.fromMe) return;
-    if (msg.from !== SHOPPING_GROUP_ID) return;
+    // בהודעות fromMe: msg.from הוא ה-WID של השולח (משה), msg.to הוא היעד (הקבוצה).
+    if (msg.to !== SHOPPING_GROUP_ID) return;
     if (!msg.body && msg.type !== 'buttons_response') return;
     if (botSentIds.delete(msg.id._serialized)) return; // הודעה שיצאה מהבוט עצמו ב-client.sendMessage
     if (apiSentIds.delete(msg.id._serialized)) return; // הודעה שיצאה דרך ה-API
+
+    // משווים את msg.from לערך ה-chat ID של הקבוצה כדי שהראוטינג ב-handlers/index.js
+    // והשליחה חזרה (client.sendMessage(msg.from)) יזהו את היעד הנכון.
+    msg.from = SHOPPING_GROUP_ID;
 
     try {
         const session = await getSession(SHOPPING_GROUP_ID);
