@@ -117,8 +117,15 @@ client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
 });
 
+let readyWatchdog = null;
 client.on('authenticated', () => {
     console.log('🔐 Authenticated!');
+    // אם ready לא נורה תוך 3 דקות — יוצאים כדי ש-start.sh יפעיל מחדש עם cleanup
+    if (readyWatchdog) clearTimeout(readyWatchdog);
+    readyWatchdog = setTimeout(() => {
+        console.error('💥 ready לא נורה תוך 3 דקות אחרי authenticated — יוצא לאתחול מלא');
+        process.exit(1);
+    }, 3 * 60 * 1000);
 });
 
 client.on('auth_failure', (msg) => {
@@ -150,6 +157,7 @@ let servicesStarted = false;
 
 client.on('ready', () => {
     console.log('✅ Bot is ready!');
+    if (readyWatchdog) { clearTimeout(readyWatchdog); readyWatchdog = null; }
 
     if (!servicesStarted) {
         servicesStarted = true;
