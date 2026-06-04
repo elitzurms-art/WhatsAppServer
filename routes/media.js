@@ -1,6 +1,14 @@
 const express = require('express');
-const { Location } = require('whatsapp-web.js');
+const multer = require('multer');
+const { MessageMedia, Location } = require('whatsapp-web.js');
 const { toChatId, ok, bad, asyncHandler, buildMedia, extractMediaArgs } = require('./utils');
+
+// העלאת קובץ בזרם (multipart) — בלי ניפוח base64 ובלי מגבלת גוף ה-JSON.
+// בזיכרון בלבד; התקרה היא ~100MB שזו ממילא מגבלת המסמכים של וואטסאפ.
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 110 * 1024 * 1024 },
+});
 
 module.exports = function mediaRoutes(client) {
     const router = express.Router();
@@ -42,6 +50,24 @@ module.exports = function mediaRoutes(client) {
         if (!args.url && !args.base64) return bad(res, 'Missing documentUrl or documentBase64');
         args.filename = filename;
         const media = await buildMedia(args);
+        media.filename = filename;
+        const sent = await client.sendMessage(chatId, media, { caption, sendMediaAsDocument: true });
+        return ok(res, { id: sent.id._serialized, chatId });
+    }));
+
+    // שליחת מסמך מקומי בזרם multipart (שדה הקובץ: "file") — לקבצים גדולים
+    // שלא נכנסים בנתיב ה-base64/JSON. עד ~100MB (מגבלת וואטסאפ).
+    router.post('/document/upload', upload.single('file'), asyncHandler(async (req, res) => {
+        const { phone, caption } = req.body;
+        const filename = req.body.filename || (req.file && req.file.originalname);
+        if (!phone) return bad(res, 'Missing phone');
+        if (!req.file) return bad(res, 'Missing file');
+        if (!filename) return bad(res, 'Missing filename');
+        const chatId = toChatId(phone);
+        if (!chatId) return bad(res, 'Invalid phone');
+
+        const mimetype = req.body.mimetype || req.file.mimetype || 'application/octet-stream';
+        const media = new MessageMedia(mimetype, req.file.buffer.toString('base64'), filename);
         media.filename = filename;
         const sent = await client.sendMessage(chatId, media, { caption, sendMediaAsDocument: true });
         return ok(res, { id: sent.id._serialized, chatId });

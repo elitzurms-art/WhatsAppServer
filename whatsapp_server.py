@@ -136,19 +136,25 @@ async def send_whatsapp_document(phone: str, document_url: str, filename: str, c
 
 @mcp.tool()
 async def send_whatsapp_document_from_file(phone: str, file_path: str, filename: str = "", caption: str = "") -> dict:
-    """Send a LOCAL document/file by uploading its bytes inline (no
-    public URL needed). `filename` is what WhatsApp shows on the file
-    bubble; if empty, the basename of `file_path` is used."""
-    b64, mimetype = _read_file_as_base64(file_path)
+    """Send a LOCAL document/file by streaming its bytes as multipart/form-data
+    (no base64 inflation, no JSON body-size limit) — handles large files up to
+    WhatsApp's ~100MB document cap. `filename` is what WhatsApp shows on the
+    file bubble; if empty, the basename of `file_path` is used."""
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
     if not filename:
         filename = os.path.basename(file_path)
-    return await _post_large("/send/document", {
-        "phone": phone,
-        "documentBase64": b64,
-        "mimetype": mimetype,
-        "filename": filename,
-        "caption": caption,
-    })
+    mimetype, _ = mimetypes.guess_type(file_path)
+    if not mimetype:
+        mimetype = "application/octet-stream"
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        with open(file_path, "rb") as f:
+            files = {"file": (filename, f, mimetype)}
+            data = {"phone": phone, "filename": filename, "mimetype": mimetype, "caption": caption}
+            r = await client.post(
+                f"{BASE_URL}/send/document/upload", headers=HEADERS, data=data, files=files
+            )
+            return r.json()
 
 
 @mcp.tool()
