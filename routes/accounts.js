@@ -38,6 +38,68 @@ module.exports = function accountsRoutes() {
         return ok(res, { id: sent?.id?._serialized || null, chatId });
     }));
 
+    // ---------- קריאות מהחשבון האישי (לצורכי אתר הלו"ז) ----------
+
+    router.get('/:id/chats', asyncHandler(async (req, res) => {
+        const limit = Math.max(0, parseInt(req.query.limit, 10) || 100);
+        const client = await accounts.ensureReady(req.params.id);
+        let chats = await client.getChats();
+        if (limit) chats = chats.slice(0, limit);
+        return ok(res, {
+            chats: chats.map(c => ({
+                id: c.id._serialized,
+                name: c.name,
+                isGroup: c.isGroup,
+                timestamp: c.timestamp,
+            })),
+        });
+    }));
+
+    const serializeContact = (c) => ({
+        id: c.id?._serialized,
+        number: c.number,
+        name: c.name,
+        pushname: c.pushname,
+        shortName: c.shortName,
+        isMyContact: c.isMyContact,
+        isGroup: c.isGroup,
+    });
+
+    router.get('/:id/contacts', asyncHandler(async (req, res) => {
+        const client = await accounts.ensureReady(req.params.id);
+        const contacts = await client.getContacts();
+        return ok(res, { contacts: contacts.map(serializeContact) });
+    }));
+
+    router.get('/:id/contacts/search', asyncHandler(async (req, res) => {
+        const name = (req.query.name || '').toString().trim().toLowerCase();
+        if (!name) return bad(res, 'Missing name', 400);
+        const client = await accounts.ensureReady(req.params.id);
+        const contacts = await client.getContacts();
+        const matches = contacts.filter(c => {
+            const fields = [c.name, c.pushname, c.shortName, c.number].filter(Boolean);
+            return fields.some(f => String(f).toLowerCase().includes(name));
+        });
+        return ok(res, { contacts: matches.map(serializeContact) });
+    }));
+
+    router.get('/:id/chats/:chatId/messages', asyncHandler(async (req, res) => {
+        const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
+        const client = await accounts.ensureReady(req.params.id);
+        const chat = await client.getChatById(req.params.chatId).catch(() => null);
+        if (!chat) return bad(res, 'Chat not found', 404);
+        const messages = await chat.fetchMessages({ limit });
+        return ok(res, {
+            messages: messages.map(m => ({
+                id: m.id?._serialized,
+                body: m.body,
+                from: m.from,
+                fromMe: m.fromMe,
+                timestamp: m.timestamp,
+            })),
+        });
+    }));
+
     router.post('/:id/logout', asyncHandler(async (req, res) => {
         await accounts.logoutAccount(req.params.id);
         return ok(res, { loggedOut: true });
