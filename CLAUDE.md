@@ -79,37 +79,33 @@ After editing, commit + push, then the server pulls and Claude Code restarts the
 
 ---
 
-## Auto-start (macOS LaunchDaemon)
+## Deployment (Linux VPS — since 2026-08-14)
 
-The bot runs as a **system LaunchDaemon** so it starts at boot without requiring a user to log in.
+The bot runs on the DigitalOcean droplet `livemaps-vps` (**178.62.249.112**, same droplet as the LiveKit relay + coturn for Navigate video calls). It was previously on a Mac (macOS LaunchDaemon) — that setup is retired.
 
-- **Plist**: `/Library/LaunchDaemons/com.elitzur.wattsap.plist` (owner `root:wheel`, mode `644`)
-- **Runs as**: user `elitzurserver` / group `staff` (set via `UserName`/`GroupName` keys; needed because Chrome user-data, credentials, and `node_modules` live under `/Users/elitzurserver`)
-- **Program**: `/bin/bash /Users/elitzurserver/Projects/WattsapServer4.0/start.sh`
-- **WorkingDirectory**: `/Users/elitzurserver/Projects/WattsapServer4.0`
-- **Env**: `HOME=/Users/elitzurserver`, `PATH` includes `/usr/local/bin` and `/opt/homebrew/bin`
-- **`RunAtLoad=true`**, **`KeepAlive=true`**, `ThrottleInterval=10`
-- **Log**: stdout+stderr → `/tmp/wattsap-start.log`
+- **Path**: `/opt/WhatsAppServer` (git clone via read-only deploy key `github.com-whatsapp`)
+- **Service**: `whatsapp-bot.service` (systemd, enabled at boot) — runs `start.sh`, which loops `node bot.js` with cleanup between restarts
+- **Log**: `/var/log/whatsapp-bot.log`
+- **Domain**: `bot.elitzurgames.com` → Cloudflare Tunnel `whatsapp-bot` (`c1fc782e-d8be-4078-b7ba-0d71c59245ab`, `cloudflared.service` on the droplet, config in `/etc/cloudflared/config.yml`) → `localhost:1000`. Note: the Mac's old tunnel (`elitzur`) still serves the `elitzurgames.com` website from the Mac — do not touch it.
+- **Secrets** (not in git): `/opt/WhatsAppServer/.env` and `/opt/WhatsAppServer/credentials.json`
+- **RAM**: droplet has only 1GB + 2GB swapfile (`/swapfile`). Chrome + bot ≈ 500-700MB. Do not run heavy extras; check `free -h` before adding services.
+- **SSH from the Windows PC**: `ssh -i ~/.ssh/hetzner_livemaps root@178.62.249.112`
 
-`start.sh` itself loops `node bot.js` with a 5-second backoff and runs a `cleanup` step before each launch (kills leftover Puppeteer Chrome processes and removes stale `SingletonLock`/`SingletonSocket`/`SingletonCookie` files in `.wwebjs_auth/session`).
-
-### Manage the daemon
+### Manage the service
 
 ```bash
-# Status
-sudo launchctl print system/com.elitzur.wattsap | head -20
-
-# Stop / start
-sudo launchctl bootout system/com.elitzur.wattsap
-sudo launchctl bootstrap system /Library/LaunchDaemons/com.elitzur.wattsap.plist
-
-# Tail log
-tail -f /tmp/wattsap-start.log
+systemctl status whatsapp-bot        # status
+systemctl restart whatsapp-bot       # full restart (fresh Chrome)
+tail -f /var/log/whatsapp-bot.log    # tail log
 ```
 
-After editing the plist, you must `bootout` then `bootstrap` again — `launchctl load -w` is deprecated for daemons.
+### Deploy updates
 
-The old user-level LaunchAgent at `~/Library/LaunchAgents/com.elitzur.wattsap.plist` was removed during the migration; do not recreate it (would cause two instances fighting over port 1000).
+```bash
+cd /opt/WhatsAppServer && git pull && npm ci && systemctl restart whatsapp-bot
+```
+
+`npm ci` (not `pnpm`) — the repo's `package-lock.json` is the source of truth; it pins `whatsapp-web.js` 1.34.6 which the patch in `patches/` depends on, and runs `patch-package` via postinstall.
 
 ---
 
