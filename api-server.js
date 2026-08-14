@@ -16,6 +16,7 @@ const groupsRoutes = require('./routes/groups');
 const presenceRoutes = require('./routes/presence');
 const webhooksRoutes = require('./routes/webhooks');
 const sessionRoutes = require('./routes/session');
+const accountsRoutes = require('./routes/accounts');
 
 const API_KEY = process.env.API_KEY || 'your-secret-key';
 const PORT = process.env.API_PORT || 1000;
@@ -174,6 +175,7 @@ function createApiServer(whatsappClient) {
     app.use('/groups', authenticate, groupsRoutes(whatsappClient));
     app.use('/webhooks', authenticate, webhooksRoutes(whatsappClient));
     app.use('/session', authenticate, sessionRoutes(whatsappClient));
+    app.use('/accounts', authenticate, accountsRoutes());
     app.use(authenticate, presenceRoutes(whatsappClient));
 
     app.use((err, req, res, next) => {
