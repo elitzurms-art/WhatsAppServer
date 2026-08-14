@@ -105,6 +105,21 @@ module.exports = function accountsRoutes() {
         });
     }));
 
+    // יצירת קבוצה חדשה מהחשבון האישי. participants אופציונלי —
+    // וואטסאפ מאפשר קבוצה שבה רק היוצר, ומוסיפים חברים אחר כך.
+    router.post('/:id/groups', asyncHandler(async (req, res) => {
+        const name = String((req.body || {}).name || '').trim();
+        if (!name) return bad(res, 'Missing name', 400);
+        const participants = Array.isArray((req.body || {}).participants)
+            ? req.body.participants.map(toChatId).filter(Boolean)
+            : [];
+        const client = await accounts.ensureReady(req.params.id);
+        const result = await client.createGroup(name, participants);
+        const gid = typeof result === 'string' ? result : result?.gid?._serialized;
+        if (!gid) return bad(res, 'Group creation failed', 500);
+        return ok(res, { group: { id: gid, name } });
+    }));
+
     router.post('/:id/logout', asyncHandler(async (req, res) => {
         await accounts.logoutAccount(req.params.id);
         return ok(res, { loggedOut: true });
