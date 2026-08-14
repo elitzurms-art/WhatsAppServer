@@ -46,7 +46,7 @@ module.exports = function accountsRoutes() {
         // לא client.getChats(): הסריאליזציה המלאה של WWebJS קורסת ("Evaluation failed: r")
         // כשהחשבון עוקב אחרי ערוצים (newsletter). ממפים ישירות מה-Store רק שדות קלים.
         let chats = await client.pupPage.evaluate(() => {
-            return window.Store.Chat.getModelsArray()
+            return window.require('WAWebCollections').Chat.getModelsArray()
                 .filter(c => c && c.id && c.id.server !== 'newsletter')
                 .map(c => ({
                     id: c.id._serialized,
