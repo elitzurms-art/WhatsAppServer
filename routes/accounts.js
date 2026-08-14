@@ -91,18 +91,34 @@ module.exports = function accountsRoutes() {
     router.get('/:id/chats/:chatId/messages', asyncHandler(async (req, res) => {
         const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
         const client = await accounts.ensureReady(req.params.id);
-        const chat = await client.getChatById(req.params.chatId).catch(() => null);
-        if (!chat) return bad(res, 'Chat not found', 404);
-        const messages = await chat.fetchMessages({ limit });
-        return ok(res, {
-            messages: messages.map(m => ({
-                id: m.id?._serialized,
-                body: m.body,
-                from: m.from,
-                fromMe: m.fromMe,
-                timestamp: m.timestamp,
-            })),
-        });
+        // לא getChatById/fetchMessages: סריאליזציית הצ'אט של WWebJS ‏(getChatModel)
+        // קורסת בחשבונות שעוקבים אחרי ערוצים. משכפל את הלוגיקה של fetchMessages
+        // עם getAsModel:false ומיפוי שדות קל בלבד.
+        const messages = await client.pupPage.evaluate(async (chatId, limit) => {
+            const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
+            if (!chat) return null;
+            const filter = (m) => !m.isNotification;
+            let msgs = chat.msgs.getModelsArray().filter(filter);
+            while (msgs.length < limit) {
+                const loaded = await window
+                    .require('WAWebChatLoadMessages')
+                    .loadEarlierMsgs({ chat });
+                if (!loaded || !loaded.length) break;
+                msgs = [...loaded.filter(filter), ...msgs];
+            }
+            return msgs
+                .sort((a, b) => (a.t || 0) - (b.t || 0))
+                .slice(-limit)
+                .map(m => ({
+                    id: m.id && m.id._serialized,
+                    body: m.body || '',
+                    from: (m.from && m.from._serialized) || null,
+                    fromMe: !!(m.id && m.id.fromMe),
+                    timestamp: m.t || 0,
+                }));
+        }, req.params.chatId, limit);
+        if (!messages) return bad(res, 'Chat not found', 404);
+        return ok(res, { messages });
     }));
 
     // יצירת קבוצה חדשה מהחשבון האישי. participants אופציונלי —
