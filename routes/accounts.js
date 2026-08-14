@@ -52,6 +52,9 @@ module.exports = function accountsRoutes() {
                     id: c.id._serialized,
                     name: c.formattedTitle || c.name || '',
                     isGroup: c.id.server === 'g.us',
+                    // קבוצה שנמחקה / שהמשתמש הוצא ממנה נשארת ב-Store עם isReadOnly —
+                    // חשוף כדי שהצרכנים יוכלו לסנן קבוצות שאי-אפשר לשלוח אליהן
+                    isReadOnly: !!c.isReadOnly,
                     timestamp: c.t || 0,
                 }));
         });
