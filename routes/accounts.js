@@ -43,16 +43,21 @@ module.exports = function accountsRoutes() {
     router.get('/:id/chats', asyncHandler(async (req, res) => {
         const limit = Math.max(0, parseInt(req.query.limit, 10) || 100);
         const client = await accounts.ensureReady(req.params.id);
-        let chats = await client.getChats();
-        if (limit) chats = chats.slice(0, limit);
-        return ok(res, {
-            chats: chats.map(c => ({
-                id: c.id._serialized,
-                name: c.name,
-                isGroup: c.isGroup,
-                timestamp: c.timestamp,
-            })),
+        // לא client.getChats(): הסריאליזציה המלאה של WWebJS קורסת ("Evaluation failed: r")
+        // כשהחשבון עוקב אחרי ערוצים (newsletter). ממפים ישירות מה-Store רק שדות קלים.
+        let chats = await client.pupPage.evaluate(() => {
+            return window.Store.Chat.getModelsArray()
+                .filter(c => c && c.id && c.id.server !== 'newsletter')
+                .map(c => ({
+                    id: c.id._serialized,
+                    name: c.formattedTitle || c.name || '',
+                    isGroup: c.id.server === 'g.us',
+                    timestamp: c.t || 0,
+                }));
         });
+        chats.sort((a, b) => b.timestamp - a.timestamp);
+        if (limit) chats = chats.slice(0, limit);
+        return ok(res, { chats });
     }));
 
     const serializeContact = (c) => ({
