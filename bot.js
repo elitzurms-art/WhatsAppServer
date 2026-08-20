@@ -155,6 +155,20 @@ let lastMessageTime = Date.now();
 let healthCheckInterval = null;
 let servicesStarted = false;
 
+// שרת ה-API עולה מיד עם התהליך ולא מתוך 'ready': נתיבי /accounts (החשבונות
+// האישיים של משתמשי הלו"ז) לא נשענים על הסשן הראשי, ואם הוא נפל או ממתין
+// לסריקת QR — אסור שכל ה-API ייפול איתו. הנתיבים של החשבון הראשי יחזירו
+// שגיאה עד שהוא יהיה ready, אבל השרת עצמו מאזין.
+let apiServerStarted = false;
+function startApiServerOnce() {
+    if (apiServerStarted) return;
+    if (!process.env.API_KEY) return;   // אופציונלי — רק אם הוגדר מפתח
+    apiServerStarted = true;
+    const { createApiServer } = require('./api-server');
+    createApiServer(client);
+    console.log('🌐 API Server started for Apps Script integration');
+}
+
 client.on('ready', () => {
     console.log('✅ Bot is ready!');
     if (readyWatchdog) { clearTimeout(readyWatchdog); readyWatchdog = null; }
@@ -162,12 +176,8 @@ client.on('ready', () => {
     if (!servicesStarted) {
         servicesStarted = true;
 
-        // הפעלת API Server (אופציונלי - רק אם API_KEY מוגדר)
-        if (process.env.API_KEY) {
-            const { createApiServer } = require('./api-server');
-            createApiServer(client);
-            console.log('🌐 API Server started for Apps Script integration');
-        }
+        // שרת ה-API כבר עלה לפני initialize — כאן רק ה-bridge שדורש סשן ראשי חי
+        startApiServerOnce();
 
         // הפעלת Chat App Bridge (אם מוגדר)
         if (process.env.CHAT_APP_URL) {
@@ -378,4 +388,5 @@ client.on('message', async (msg) => {
 // Start
 // =======================
 console.log('🚀 מתחיל להפעיל את הבוט...');
+startApiServerOnce();
 client.initialize();
