@@ -275,9 +275,25 @@ async function ensureReady(id) {
     if (!registry.accounts[id].linked) throw new Error('not-linked');
     let s = live.get(id);
     if (!s || s.status === 'stopped' || s.status === 'failed') s = await startAccount(id);
-    if (s.status !== 'ready') await s.readyPromise;
+    if (s.status !== 'ready') await waitForReady(s);
     touch(id);
     return s.client;
+}
+
+// ממתינים למצב הנוכחי ולא ל-readyPromise החד-פעמי: ready-timeout אחד לא אומר
+// שהסשן מת — הוא ממשיך לעלות ברקע. עם ההבטחה הדחויה כל קריאה נוספת נפלה מיד,
+// וגם "נסה שוב" באתר לא יכול היה להצליח לעולם.
+function waitForReady(state, timeoutMs = READY_TIMEOUT_MS) {
+    const deadline = Date.now() + timeoutMs;
+    return new Promise((resolve, reject) => {
+        const tick = () => {
+            if (state.status === 'ready') return resolve();
+            if (state.status === 'failed' || state.status === 'stopped') return reject(new Error(`session-${state.status}`));
+            if (Date.now() >= deadline) return reject(new Error('ready-timeout'));
+            setTimeout(tick, 1000);
+        };
+        tick();
+    });
 }
 
 async function sendFromAccount(id, chatId, message) {
