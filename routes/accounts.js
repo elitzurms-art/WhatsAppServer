@@ -42,12 +42,16 @@ module.exports = function accountsRoutes() {
 
     router.get('/:id/chats', asyncHandler(async (req, res) => {
         const limit = Math.max(0, parseInt(req.query.limit, 10) || 100);
+        // groupsOnly: הצרכן היחיד היום (אתר הלו"ז) צריך רק קבוצות. סינון בתוך
+        // ה-evaluate חוסך מיפוי והעברה של אלפי צ'אטים פרטיים — קריטי על שרת איטי.
+        const groupsOnly = req.query.groupsOnly === '1' || req.query.groupsOnly === 'true';
         const client = await accounts.ensureReady(req.params.id);
         // לא client.getChats(): הסריאליזציה המלאה של WWebJS קורסת ("Evaluation failed: r")
         // כשהחשבון עוקב אחרי ערוצים (newsletter). ממפים ישירות מה-Store רק שדות קלים.
-        let chats = await client.pupPage.evaluate(() => {
+        let chats = await client.pupPage.evaluate((onlyGroups) => {
             return window.require('WAWebCollections').Chat.getModelsArray()
-                .filter(c => c && c.id && c.id.server !== 'newsletter')
+                .filter(c => c && c.id && c.id.server !== 'newsletter'
+                    && (!onlyGroups || c.id.server === 'g.us'))
                 .map(c => ({
                     id: c.id._serialized,
                     name: c.formattedTitle || c.name || '',
@@ -57,7 +61,7 @@ module.exports = function accountsRoutes() {
                     isReadOnly: !!c.isReadOnly,
                     timestamp: c.t || 0,
                 }));
-        });
+        }, groupsOnly);
         chats.sort((a, b) => b.timestamp - a.timestamp);
         if (limit) chats = chats.slice(0, limit);
         return ok(res, { chats });
