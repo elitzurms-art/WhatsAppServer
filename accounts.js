@@ -9,6 +9,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
 const REGISTRY_FILE = path.join(__dirname, 'accounts.json');
@@ -50,6 +51,18 @@ function authDirFor(id) {
 
 // ---------- מחזור חיים של סשן ----------
 
+// Chrome נועל את תיקיית הסשן. אם התהליך הקודם מת בלי לסגור כמו שצריך
+// (קריסה, initialize שנכשל באמצע) — נשארים קובצי Singleton* ולעיתים תהליך
+// יתום, וכל ניסיון עלייה הבא נכשל ב-"The browser is already running".
+// לכן מנקים לפני כל עלייה של סשן שאינו חי, וגם אחרי כישלון.
+function clearStaleSession(id) {
+    const dir = authDirFor(id);
+    try { execSync(`pkill -9 -f "user-data-dir=${dir}"`, { stdio: 'ignore' }); } catch {}
+    for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+        try { fs.unlinkSync(path.join(dir, f)); } catch {}
+    }
+}
+
 function touch(id) {
     const s = live.get(id);
     if (!s) return;
@@ -67,6 +80,9 @@ async function startAccount(id) {
         touch(id);
         return existing;
     }
+
+    // אין סשן חי לחשבון הזה — לוודא שלא נשארו נעילות/תהליך יתום מריצה קודמת
+    clearStaleSession(id);
 
     const state = { client: null, status: 'starting', qr: null, info: null, idleTimer: null, readyPromise: null };
     live.set(id, state);
@@ -142,8 +158,11 @@ async function startAccount(id) {
     // מונע unhandled rejection כשאף אחד לא מחכה ל-readyPromise (למשל בזמן קישור QR)
     state.readyPromise.catch(() => {});
 
-    await client.initialize().catch((e) => {
+    await client.initialize().catch(async (e) => {
         state.status = 'failed';
+        live.delete(id);                        // הניסיון הבא יתחיל מאפס
+        try { await client.destroy(); } catch {} // לא להשאיר Chrome יתום
+        clearStaleSession(id);
         throw e;
     });
 
