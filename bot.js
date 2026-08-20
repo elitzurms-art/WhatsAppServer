@@ -112,7 +112,26 @@ client.sendMessage = async (...args) => {
 // =======================
 // QR
 // =======================
+// אחרי ה-OOM ב-19/08 הדף נתקע בטעינה: לא ready, לא authenticated, ואפילו לא
+// QR — ולכן שום watchdog לא נדרך והבוט שכב יומיים. השעון הזה נדרך עם העלייה
+// ונעצר בסימן החיים הראשון (QR או ready); אם לא הגיע אף אחד — יציאה,
+// ו-start.sh מרים מחדש עם cleanup מלא.
+const START_WATCHDOG_MS = 5 * 60 * 1000;
+let sawLifeSign = false;
+const startWatchdog = setTimeout(() => {
+    if (sawLifeSign) return;
+    console.error('💥 5 דקות בלי QR ובלי ready — הסשן תקוע, יוצא לאתחול מלא');
+    process.exit(1);
+}, START_WATCHDOG_MS);
+
+function lifeSign() {
+    if (sawLifeSign) return;
+    sawLifeSign = true;
+    clearTimeout(startWatchdog);
+}
+
 client.on('qr', (qr) => {
+    lifeSign();
     console.log('סרוק את קוד ה-QR הבא:');
     qrcode.generate(qr, { small: true });
 });
@@ -170,6 +189,7 @@ function startApiServerOnce() {
 }
 
 client.on('ready', () => {
+    lifeSign();
     console.log('✅ Bot is ready!');
     if (readyWatchdog) { clearTimeout(readyWatchdog); readyWatchdog = null; }
 

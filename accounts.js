@@ -14,7 +14,8 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 
 const REGISTRY_FILE = path.join(__dirname, 'accounts.json');
 const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
-const IDLE_STOP_MS = 10 * 60 * 1000;      // כיבוי אחרי 10 דקות בלי שליחה
+const IDLE_STOP_MS = 5 * 60 * 1000;        // כיבוי אחרי 5 דקות בלי שליחה
+const MAX_LIVE_ACCOUNTS = 1;              // כמה סשנים אישיים מותר להריץ במקביל
 const READY_TIMEOUT_MS = 90 * 1000;       // המתנה מקסימלית לעליית סשן מקושר
 
 // qrcode אופציונלי — אם לא מותקן, נחזיר רק את המחרוזת בלי תמונה
@@ -83,6 +84,7 @@ async function startAccount(id) {
 
     // אין סשן חי לחשבון הזה — לוודא שלא נשארו נעילות/תהליך יתום מריצה קודמת
     clearStaleSession(id);
+    await enforceLiveLimit(id);
 
     const state = { client: null, status: 'starting', qr: null, info: null, idleTimer: null, readyPromise: null };
     live.set(id, state);
@@ -103,6 +105,12 @@ async function startAccount(id) {
                 '--no-first-run',
                 '--no-zygote',
                 '--lang=en-US',
+                // חיסכון בזיכרון — הדרופלט צר, ראה enforceLiveLimit
+                '--renderer-process-limit=1',
+                '--disable-extensions',
+                '--disable-background-networking',
+                '--disable-breakpad',
+                '--disable-crash-reporter',
             ],
         },
     });
@@ -176,6 +184,18 @@ async function startAccount(id) {
 
     touch(id);
     return state;
+}
+
+// הדרופלט (1GB) כבר מחזיק את ה-Chrome של החשבון הראשי. ב-19/08 סשן אישי
+// שעלה לצידו הקפיץ את ה-cgroup מעבר ל-MemorySwapMax, ה-OOM killer הרג את
+// השירות ושני הסשנים איבדו את ה-auth שלהם. לכן: סשן אישי אחד בכל רגע.
+async function enforceLiveLimit(exceptId) {
+    const others = [...live.keys()].filter((k) => k !== exceptId);
+    while (others.length >= MAX_LIVE_ACCOUNTS) {
+        const victim = others.shift();
+        console.log(`♻️ [acct:${victim}] מכובה כדי לפנות זיכרון לסשן אחר`);
+        await stopAccount(victim).catch(() => {});
+    }
 }
 
 async function stopAccount(id) {
