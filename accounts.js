@@ -114,6 +114,14 @@ async function startAccount(id) {
         client.on('qr', (qr) => {
             state.status = 'qr';
             state.qr = qr;
+            // QR נוצר למרות auth שמור = ה-auth כבר לא תקף (נותק מהטלפון / פג).
+            // בלי לעדכן את הרישום, הלקוח ממשיך להאמין שהחשבון מקושר,
+            // מציג "מחובר" ולא מציע קישור מחדש — והמשתמש תקוע.
+            if (registry.accounts[id].linked) {
+                registry.accounts[id].linked = false;
+                saveRegistry(registry);
+                console.log(`⚠️ [acct:${id}] ה-auth השמור לא תקף עוד — סומן כלא מקושר`);
+            }
             console.log(`🔗 [acct:${id}] QR חדש נוצר`);
         });
 
