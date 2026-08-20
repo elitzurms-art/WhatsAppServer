@@ -16,7 +16,8 @@ const REGISTRY_FILE = path.join(__dirname, 'accounts.json');
 const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
 const IDLE_STOP_MS = 5 * 60 * 1000;        // כיבוי אחרי 5 דקות בלי שליחה
 const MAX_LIVE_ACCOUNTS = 1;              // כמה סשנים אישיים מותר להריץ במקביל
-const READY_TIMEOUT_MS = 90 * 1000;       // המתנה מקסימלית לעליית סשן מקושר
+const READY_TIMEOUT_MS = 180 * 1000;      // המתנה מקסימלית לעליית סשן מקושר
+                                          // (עלייה קרה על הדרופלט לוקחת 1.5-2.5 דק')
 
 // qrcode אופציונלי — אם לא מותקן, נחזיר רק את המחרוזת בלי תמונה
 let QRCode = null;
